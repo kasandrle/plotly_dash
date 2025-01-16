@@ -21,6 +21,7 @@ theta_all = []
 for file in onlyfiles_keys:
     file_path = join(path, file)
     df = pd.read_csv(file_path)#.groupby('file_list', as_index=False)
+    df['file_name'] = file  # Add the file name column
     file_uni = np.unique(df['file_list'])
     # Iterate over each unique 'file_list' value
     for f in file_uni:
@@ -29,7 +30,6 @@ for file in onlyfiles_keys:
         
         # Normalize 'order_list' for the current 'file_list' value by the value where 'order_list' is 1
         norm_value = df.loc[mask & (df['order_list'] == 1), 'intensity_list'].values[0]
-        #print(norm_value)
         df.loc[mask, 'normalized_intensity_list'] = df.loc[mask, 'intensity_list'] / norm_value
 
     theta_all.append(np.unique(df['theta_list']))
@@ -37,6 +37,10 @@ for file in onlyfiles_keys:
     E_all.append(np.unique(df['energy_list']))
     exp_data_all.append(df)
 
+# Concatenate all DataFrames into one
+combined_df = pd.concat(exp_data_all, ignore_index=True)
+
+# Unique values for orders, energies, and thetas
 orders = np.unique(np.concatenate(order_all))
 energies = np.unique(np.concatenate(E_all))
 thetas = np.unique(np.concatenate(theta_all))
@@ -110,25 +114,21 @@ app.layout = dbc.Container([
     Input('scale-selector', 'value'),
     Input('boolean-button', 'value'),
 )
-def update_graph(entry, order,scale,norm):
-    df_list = []
-    names = []
-    for i in entry:
-        e_uni_temp = np.unique(exp_data_all[i]['energy_list'])
-        for o in order:
-            for e in e_uni_temp:
-                mask = (exp_data_all[i]['order_list'] == o) & (exp_data_all[i]['energy_list'] == e)
-                name = onlyfiles_keys[i] + ' ' + str(o)+ ' ' + str(e)
-                if norm:
-                    df_list.append(exp_data_all[i][['theta_list', 'normalized_intensity_list']][mask].rename(columns={'normalized_intensity_list': name}))
-                else:
-                    df_list.append(exp_data_all[i][['theta_list', 'intensity_list']][mask].rename(columns={'intensity_list': name}))
-                names.append(name)
+def update_graph(entry, order, scale, norm):
+    files = [onlyfiles_keys[i] for i in entry]
+    filtered_df = combined_df[combined_df['file_name'].isin(files) & combined_df['order_list'].isin(order)]
     
-    df = reduce(lambda x, y: x.merge(y, on='theta_list', how='outer'), df_list)
-    fig = px.scatter(df, x='theta_list', y=names)
+    if norm:
+        value_column = 'normalized_intensity_list'
+    else:
+        value_column = 'intensity_list'
+    
+    filtered_df['label'] = filtered_df.apply(lambda row: f"{row['order_list']} {row['file_name']} {row['energy_list']}", axis=1)
+    
+    fig = px.scatter(filtered_df, x='theta_list', y=value_column, color='label')
     fig.update_xaxes(range=[np.min(thetas)-0.5, np.max(thetas)+0.5])
-    fig.update_layout( yaxis_type=scale)
+    fig.update_layout(yaxis_type=scale)
+    
     return fig
 
 @callback(
@@ -140,26 +140,23 @@ def update_graph(entry, order,scale,norm):
     Input('boolean-button-1', 'value'),
 )
 def update_graph_(entry, energy, theta,scale,norm):
-    df_list = []
-    names = []
-    for i in entry:
-        for e in energy:
-            for t in theta:
-                mask = (exp_data_all[i]['theta_list'] == t) & (exp_data_all[i]['energy_list'] == e)
-                file_list_temp_uni = np.unique(exp_data_all[i]['file_list'][mask])
-                for f in file_list_temp_uni:
-                    name = onlyfiles_keys[i] + ' ' + str(e) + ' ' + str(t) + ' ' + f
-                    if norm:
-                        df_list.append(exp_data_all[i][['order_list', 'normalized_intensity_list']][mask & (exp_data_all[i]['file_list'] == f)].rename(columns={'normalized_intensity_list': name}))
-                    else:
-                        df_list.append(exp_data_all[i][['order_list', 'intensity_list']][mask & (exp_data_all[i]['file_list'] == f)].rename(columns={'intensity_list': name}))
-                    names.append(name)
+    files = [onlyfiles_keys[i] for i in entry]
+    filtered_df = combined_df[combined_df['file_name'].isin(files) & combined_df['energy_list'].isin(energy) & combined_df['theta_list'].isin(theta)]
     
-    df = reduce(lambda x, y: x.merge(y, on='order_list', how='outer'), df_list)
-    fig = px.scatter(df, x='order_list', y=names, title=f"{energy} eV, {theta}")
+    if norm:
+        value_column = 'normalized_intensity_list'
+    else:
+        value_column = 'intensity_list'
+    
+    filtered_df['label'] = filtered_df.apply(lambda row: f"{row['theta_list']} {row['file_name']} {row['energy_list']}", axis=1)
+
+    fig = px.scatter(filtered_df, x='order_list', y=value_column, color='label')
     fig.update_xaxes(range=[np.min(orders)-0.5, np.max(orders)+0.5])
     fig.update_layout(yaxis_type=scale)
+    
     return fig
+
+
 
 # Run the app
 if __name__ == '__main__':
